@@ -42,6 +42,8 @@ jobs:
   # C19: MISE EN PLACE DE LA LIVRAISON CONTINUE
   package:
     name: "C19: Packaging & Continuous Delivery Preparation"
+    permissions:
+      contents: write
     needs: test
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     runs-on: ubuntu-latest
