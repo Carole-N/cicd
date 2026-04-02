@@ -2,9 +2,9 @@ name: "CI/CD Pipeline - C18/C19 Brief"
 
 on:
   push:
-    branches: [ "main", "develop" ]
+    branches: ["main", "develop"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
   # C18: AUTOMATISATION DES TESTS
@@ -12,32 +12,32 @@ jobs:
     name: "C18: Automated Testing & Quality Indicators"
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: "C18: Preparation of environment"
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - name: "C18: Preparation of environment"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-    - name: "C18: Installation of dependencies"
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+      - name: "C18: Installation of dependencies"
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-    - name: "C18: Linting with ruff"
-      run: |
-        ruff check .
-        ruff format --check .
+      - name: "C18: Linting with ruff"
+        run: |
+          ruff check .
+          ruff format --check .
 
-    - name: "C18: Run tests & Produce indicators (Coverage)"
-      run: |
-        pytest --cov=app --cov-report=term-missing --cov-report=xml
+      - name: "C18: Run tests & Produce indicators (Coverage)"
+        run: |
+          pytest --cov=app --cov-report=term-missing --cov-report=xml
 
-    - name: "C18: Upload Test Results as Artifacts (Traceability)"
-      uses: actions/upload-artifact@v4
-      with:
-        name: test-coverage-report
-        path: coverage.xml
+      - name: "C18: Upload Test Results as Artifacts (Traceability)"
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-coverage-report
+          path: coverage.xml
 
   # C19: MISE EN PLACE DE LA LIVRAISON CONTINUE
   package:
@@ -48,27 +48,42 @@ jobs:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: "C19: Packaging - Build Docker Image (Artifact Generation)"
-      run: |
-        docker build -t fastapi-app:latest .
+      - name: "C19: Login to Docker Hub"
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    - name: "C19: Artifact Validation - Test Image Run"
-      run: |
-        docker run -d --name test-container -p 8080:80 fastapi-app:latest
-        sleep 5
-        curl --fail http://localhost:8080/health || exit 1
-        docker stop test-container
+      - name: "C19: Packaging - Build Docker Image"
+        run: |
+          docker build \
+            -t carnov/cicd:v${{ github.run_number }} \
+            -t carnov/cicd:latest \
+            .
 
-    - name: "C19: Continuous Delivery - Create GitHub Release (Versioning)"
-      if: github.ref == 'refs/heads/main'
-      uses: softprops/action-gh-release@v2
-      with:
-        tag_name: v${{ github.run_number }}
-        name: "Release v${{ github.run_number }}"
-        body: "Automated delivery of a new version. All tests passed (C18), Artifact built and validated (C19)."
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: "C19: Artifact Validation - Test Image Run"
+        run: |
+          docker run -d --name test-container -p 8080:80 carnov/cicd:v${{ github.run_number }}
+          sleep 5
+          curl --fail http://localhost:8080/health || exit 1
+          docker stop test-container
+          docker rm test-container
+
+      - name: "C19: Push Docker Image to Docker Hub"
+        run: |
+          docker push carnov/cicd:v${{ github.run_number }}
+          docker push carnov/cicd:latest
+
+      - name: "C19: Continuous Delivery - Create GitHub Release (Versioning)"
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: "Release v${{ github.run_number }}"
+          body: "Automated delivery of a new version. All tests passed (C18), Docker image built, validated, and pushed to Docker Hub (C19)."
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
