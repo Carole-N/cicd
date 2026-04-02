@@ -1,3 +1,5 @@
+[![CI/CD Pipeline - C18/C19 Brief](https://github.com/Carole-N/cicd/actions/workflows/ci-cd-brief.yml/badge.svg?branch=main)](https://github.com/Carole-N/cicd/actions/workflows/ci-cd-brief.yml)
+
 # Example CI/CD Project - Brief C18 / C19
 
 This project demonstrates a complete automated integration (CI) and delivery (CD) pipeline.
