@@ -2,8 +2,10 @@ import os
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
+from prometheus_fastapi_instrumentator import Instrumentator
 
 app = FastAPI()
+Instrumentator().instrument(app).expose(app)
 
 APP_NAME = os.getenv("APP_NAME", "FastAPI Dummy Project")
 
