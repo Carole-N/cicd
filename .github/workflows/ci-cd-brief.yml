@@ -1,59 +1,99 @@
+# Nom affiché dans l’onglet GitHub Actions
 name: "CI/CD Pipeline - C18/C19 Brief"
 
+# Événements qui déclenchent le pipeline
 on:
+  # Le pipeline se lance à chaque push sur main ou develop
   push:
     branches: ["main", "develop"]
+
+  # Le pipeline se lance aussi lors d’une pull request vers main
   pull_request:
     branches: ["main"]
 
+# Liste des jobs du pipeline
 jobs:
+
+  # =========================
+  # JOB 1 : TEST / CI
+  # =========================
   test:
+    # Nom lisible dans GitHub Actions
     name: "C18: Automated Testing & Quality Indicators"
+
+    # Machine virtuelle utilisée par GitHub
     runs-on: ubuntu-latest
+
+    # Étapes du job
     steps:
+      # Récupère le code du dépôt sur la machine GitHub
       - uses: actions/checkout@v4
 
+      # Installe Python dans la version voulue
       - name: "C18: Preparation of environment"
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      # Installe les dépendances du projet
       - name: "C18: Installation of dependencies"
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # Vérifie la qualité / le style du code avec Ruff
       - name: "C18: Linting with ruff"
         run: |
           ruff check .
           ruff format --check .
 
+      # Lance les tests et génère la couverture
       - name: "C18: Run tests & Produce indicators (Coverage)"
         run: |
           pytest --cov=app --cov-report=term-missing --cov-report=xml
 
+      # Enregistre le fichier de couverture comme artefact téléchargeable
       - name: "C18: Upload Test Results as Artifacts (Traceability)"
         uses: actions/upload-artifact@v4
         with:
           name: test-coverage-report
           path: coverage.xml
 
+  # =========================
+  # JOB 2 : PACKAGE
+  # =========================
   package:
+    # Nom lisible dans GitHub Actions
     name: "C19: Packaging & Continuous Delivery Preparation"
+
+    # Permission nécessaire pour créer une release GitHub
     permissions:
       contents: write
+
+    # Ce job ne démarre qu’après la réussite du job test
     needs: test
+
+    # Il ne s’exécute que sur push vers main ou develop
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+
+    # Machine virtuelle utilisée
     runs-on: ubuntu-latest
+
+    # Étapes du job
     steps:
+      # Récupère le code du dépôt
       - uses: actions/checkout@v4
 
+      # Se connecte à Docker Hub grâce aux secrets GitHub
       - name: "C19: Login to Docker Hub"
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # Construit l’image Docker avec 2 tags :
+      # - un tag versionné avec le numéro du run
+      # - latest pour la version la plus récente
       - name: "C19: Packaging - Build Docker Image"
         run: |
           docker build \
@@ -61,6 +101,7 @@ jobs:
             -t carnov/cicd:latest \
             .
 
+      # Lance temporairement le conteneur pour vérifier qu’il fonctionne
       - name: "C19: Artifact Validation - Test Image Run"
         run: |
           docker run -d --name test-container -p 8080:80 carnov/cicd:v${{ github.run_number }}
@@ -69,11 +110,13 @@ jobs:
           docker stop test-container
           docker rm test-container
 
+      # Envoie l’image Docker sur Docker Hub
       - name: "C19: Push Docker Image to Docker Hub"
         run: |
           docker push carnov/cicd:v${{ github.run_number }}
           docker push carnov/cicd:latest
 
+      # Crée une release GitHub uniquement si on est sur la branche main
       - name: "C19: Continuous Delivery - Create GitHub Release (Versioning)"
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
@@ -86,28 +129,86 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # =========================
+  # JOB 3 : DEPLOY + PROMETHEUS
+  # =========================
   deploy:
+    # Nom lisible dans GitHub Actions
     name: "C19: Deploy to EC2"
+
+    # Ce job démarre seulement si package a réussi
     needs: package
+
+    # On déploie uniquement sur un push vers main
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    # Machine virtuelle GitHub utilisée pour exécuter ce job
     runs-on: ubuntu-latest
+
     steps:
-      - name: "C19: Deploy on EC2 via SSH"
+      # Récupère le contenu du dépôt sur le runner GitHub
+      # Important ici, car on veut pouvoir copier monitoring/prometheus.yml
+      - uses: actions/checkout@v4
+
+      # Copie le fichier de configuration Prometheus depuis le dépôt
+      # vers l'instance EC2
+      - name: "C19: Copy Prometheus config to EC2"
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "monitoring/prometheus.yml"
+          target: "/home/ubuntu"
+
+      # Se connecte en SSH à EC2 pour :
+      # 1) installer / démarrer Docker
+      # 2) redéployer l'application
+      # 3) lancer Prometheus avec le fichier de config copié
+      - name: "C19: Deploy app and start Prometheus on EC2"
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            # Arrête le script à la première erreur
+            set -e
+
+            # Met à jour la liste des paquets
             sudo apt-get update -y
+
+            # Installe Docker si nécessaire
             sudo apt-get install -y docker.io
+
+            # Active Docker au démarrage
             sudo systemctl enable docker
+
+            # Démarre Docker
             sudo systemctl start docker
+
+            # Déploie l'application FastAPI
             sudo docker rm -f cicd-app || true
             sudo docker pull carnov/cicd:latest
             sudo docker run -d --name cicd-app -p 80:80 --restart always carnov/cicd:latest
 
+            # Lance Prometheus
+            sudo docker rm -f prometheus || true
+            sudo docker pull prom/prometheus:latest
+            sudo docker run -d --name prometheus \
+              -p 9090:9090 \
+              --restart always \
+              -v /home/ubuntu/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml \
+              prom/prometheus:latest
+
+      # Vérifie que l'application répond toujours
       - name: "C19: Verify deployed application"
         run: |
           sleep 10
           curl --fail http://${{ secrets.EC2_HOST }}/health
+
+      # Vérifie que Prometheus répond
+      - name: "C19: Verify Prometheus"
+        run: |
+          sleep 10
+          curl --fail http://${{ secrets.EC2_HOST }}:9090

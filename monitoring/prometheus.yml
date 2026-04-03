@@ -1,0 +1,18 @@
+# Réglages globaux de Prometheus
+global:
+  # Toutes les 15 secondes, Prometheus viendra relire les métriques
+  scrape_interval: 15s
+
+# Liste des cibles à surveiller
+scrape_configs:
+  # Nom libre pour identifier ce bloc de collecte
+  - job_name: "fastapi-app"
+
+    # Endpoint où ton application expose les métriques
+    metrics_path: /metrics
+
+    # Cible à interroger
+    static_configs:
+      # Ton application tourne sur ton instance EC2
+      # Port 80 car ton app est servie en HTTP dessus
+      - targets: ["51.21.251.83:80"]
