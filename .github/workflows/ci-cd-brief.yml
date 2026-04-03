@@ -130,7 +130,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # =========================
-  # JOB 3 : DEPLOY + PROMETHEUS
+  # JOB 3 : DEPLOY + PROMETHEUS + GRAFANA
   # =========================
   deploy:
     # Nom lisible dans GitHub Actions
@@ -150,8 +150,7 @@ jobs:
       # Important ici, car on veut pouvoir copier monitoring/prometheus.yml
       - uses: actions/checkout@v4
 
-      # Copie le fichier de configuration Prometheus depuis le dépôt
-      # vers l'instance EC2
+      # Copie le fichier de configuration Prometheus vers l'instance EC2
       - name: "C19: Copy Prometheus config to EC2"
         uses: appleboy/scp-action@v1
         with:
@@ -164,8 +163,9 @@ jobs:
       # Se connecte en SSH à EC2 pour :
       # 1) installer / démarrer Docker
       # 2) redéployer l'application
-      # 3) lancer Prometheus avec le fichier de config copié
-      - name: "C19: Deploy app and start Prometheus on EC2"
+      # 3) lancer Prometheus
+      # 4) lancer Grafana
+      - name: "C19: Deploy app, Prometheus and Grafana on EC2"
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -201,6 +201,14 @@ jobs:
               -v /home/ubuntu/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml \
               prom/prometheus:latest
 
+            # Lance Grafana
+            sudo docker rm -f grafana || true
+            sudo docker pull grafana/grafana:latest
+            sudo docker run -d --name grafana \
+              -p 3000:3000 \
+              --restart always \
+              grafana/grafana:latest
+
       # Vérifie que l'application répond toujours
       - name: "C19: Verify deployed application"
         run: |
@@ -212,3 +220,9 @@ jobs:
         run: |
           sleep 10
           curl --fail http://${{ secrets.EC2_HOST }}:9090
+
+      # Vérifie que Grafana répond
+      - name: "C19: Verify Grafana"
+        run: |
+          sleep 10
+          curl --fail http://${{ secrets.EC2_HOST }}:3000
